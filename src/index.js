@@ -382,48 +382,109 @@ function sortPlayersWithoutTeamGroupBy(a, b) {
 }
 
 /**
- * Sava data to local disk. Every new run generates a new file.
+ * Save data to local disk in JSON format. Every new run generates a new file.
  */
 function saveData(db, filename) {
-  const csvData = parse(db);
-  fs.writeFile(filename, csvData, error => {
-      if (error == null) {
-          console.log(`Successfully saved data to ${filename}`);
-      } else {
-          console.log(`Failed to save data to ${filename}:`, error);
-      }
-  });
+  try {
+    // Convert player objects to plain objects for JSON serialization
+    const plainData = db.map(player => ({
+      name: player.name,
+      team: player.team,
+      position: player.position,
+      height: player.height,
+      overallAttribute: player.overallAttribute,
+      // Outside Scoring
+      closeShot: player.closeShot,
+      midRangeShot: player.midRangeShot,
+      threePointShot: player.threePointShot,
+      freeThrow: player.freeThrow,
+      shotIQ: player.shotIQ,
+      offensiveConsistency: player.offensiveConsistency,
+      // Inside Scoring
+      layup: player.layup,
+      standingDunk: player.standingDunk,
+      drivingDunk: player.drivingDunk,
+      postHook: player.postHook,
+      postFade: player.postFade,
+      postControl: player.postControl,
+      drawFoul: player.drawFoul,
+      hands: player.hands,
+      // Playmaking
+      passAccuracy: player.passAccuracy,
+      ballHandle: player.ballHandle,
+      speedWithBall: player.speedWithBall,
+      passIQ: player.passIQ,
+      passVision: player.passVision,
+      // Defense
+      interiorDefense: player.interiorDefense,
+      perimeterDefense: player.perimeterDefense,
+      steal: player.steal,
+      block: player.block,
+      helpDefenseIQ: player.helpDefenseIQ,
+      passPerception: player.passPerception,
+      defensiveConsistency: player.defensiveConsistency,
+      // Rebounding
+      offensiveRebound: player.offensiveRebound,
+      defensiveRebound: player.defensiveRebound,
+      // Athleticism
+      speed: player.speed,
+      agility: player.agility,
+      strength: player.strength,
+      vertical: player.vertical,
+      stamina: player.stamina,
+      hustle: player.hustle,
+      overallDurability: player.overallDurability,
+      // Badges
+      legendaryBadgeCount: player.legendaryBadgeCount,
+      purpleBadgeCount: player.purpleBadgeCount,
+      goldBadgeCount: player.goldBadgeCount,
+      silverBadgeCount: player.silverBadgeCount,
+      bronzeBadgeCount: player.bronzeBadgeCount,
+      badgeCount: player.badgeCount,
+      outsideScoringBadgeCount: player.outsideScoringBadgeCount,
+      insideScoringBadgeCount: player.insideScoringBadgeCount,
+      playmakingBadgeCount: player.playmakingBadgeCount,
+      defensiveBadgeCount: player.defensiveBadgeCount,
+      reboundingBadgeCount: player.reboundingBadgeCount,
+      generalOffenseBadgeCount: player.generalOffenseBadgeCount,
+      allAroundBadgeCount: player.allAroundBadgeCount
+    }));
+
+    const jsonData = JSON.stringify(plainData, null, 2);
+    fs.writeFileSync(filename, jsonData);
+    console.log(`Successfully saved data to ${filename}`);
+  } catch (error) {
+    console.log(`Failed to save data to ${filename}:`, error);
+  }
 }
 
 /**
- * Load existing player data from CSV file
+ * Load existing player data from JSON file
  */
 function loadExistingPlayers(filename) {
   if (!fs.existsSync(filename)) {
     return new Map();
   }
 
-  const content = fs.readFileSync(filename, 'utf8');
-  const lines = content.split('\n');
-  const players = new Map();
+  try {
+    const content = fs.readFileSync(filename, 'utf8');
+    const playersData = JSON.parse(content);
+    const players = new Map();
 
-  // Skip header line
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
+    playersData.forEach(player => {
+      if (player.name && player.team && player.overallAttribute) {
+        players.set(player.name.toLowerCase(), {
+          ...player,
+          lastUpdated: fs.statSync(filename).mtime
+        });
+      }
+    });
 
-    const [name, team, overall] = line.split(',');
-    if (name && team && overall) {
-      players.set(name.toLowerCase(), {
-        name,
-        team,
-        overall: parseInt(overall),
-        lastUpdated: fs.statSync(filename).mtime // Add last update time
-      });
-    }
+    return players;
+  } catch (error) {
+    console.log(`Failed to load existing players from ${filename}:`, error);
+    return new Map();
   }
-
-  return players;
 }
 
 /**
@@ -454,15 +515,15 @@ function shouldFetchPlayer(playerName, team, existingPlayers) {
 }
 
 /**
- * Get the latest CSV file in the data directory
+ * Get the latest JSON file in the data directory
  */
-function getLatestCSVFile(prefix) {
+function getLatestJSONFile(prefix) {
   if (!fs.existsSync('./data')) {
     return null;
   }
 
   const files = fs.readdirSync('./data')
-    .filter(file => file.startsWith(prefix) && file.endsWith('.csv'))
+    .filter(file => file.startsWith(prefix) && file.endsWith('.json'))
     .map(file => ({
       name: file,
       path: `./data/${file}`,
@@ -475,11 +536,7 @@ function getLatestCSVFile(prefix) {
 
 const main = async function () {
   let teams = CURRENT_TEAMS;
-
-  // <teams, all player urls>
   var roster = new Map();
-
-  // all players details
   var players = [];
 
   // Create data directory if it doesn't exist
@@ -487,14 +544,14 @@ const main = async function () {
     fs.mkdirSync('./data');
   }
 
-  // Get latest CSV files and load existing data
-  const latestTeamFile = getLatestCSVFile('2kroster_team_');
+  // Get latest JSON files and load existing data
+  const latestTeamFile = getLatestJSONFile('2kroster_team_');
   const existingPlayers = latestTeamFile ? loadExistingPlayers(latestTeamFile) : new Map();
 
   // Create timestamp for new filenames
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const teamFilename = `./data/2kroster_team_${timestamp}.csv`;
-  const leagueFilename = `./data/2kroster_league_${timestamp}.csv`;
+  const teamFilename = `./data/2kroster_team_${timestamp}.json`;
+  const leagueFilename = `./data/2kroster_league_${timestamp}.json`;
 
   console.log("################ Fetching player urls ... ################");
   await Promise.all(
